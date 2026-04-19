@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Contenedor Celiaco</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+    <style>
+        body { margin: 0; font-family: Arial, sans-serif; background: #f7f7f7; }
+        .container { display: flex; height: 100vh; width: 100%; }
+        .panel { width: 340px; background: #fff; padding: 20px; box-sizing: border-box; overflow-y: auto; border-right: 1px solid #ddd; }
+        .panel h1 { margin-top: 0; font-size: 24px; }
+        .panel p { margin-top: 0; color: #555; font-size: 14px; }
+        .field { margin-bottom: 14px; }
+        .field label { display: block; margin-bottom: 6px; font-weight: bold; font-size: 14px; }
+        .field input, .field select { width: 100%; padding: 10px; box-sizing: border-box; font-size: 14px; border: 1px solid #ccc; border-radius: 6px; }
+        .field button { width: 100%; padding: 12px; border: none; background: #2f855a; color: white; font-size: 15px; border-radius: 6px; cursor: pointer; margin-bottom: 8px; }
+        .field button:hover { background: #276749; }
+        .btn-blue { background: #2563eb !important; }
+        .btn-blue:hover { background: #1d4ed8 !important; }
+        .btn-orange { background: #d97706 !important; }
+        .btn-orange:hover { background: #b45309 !important; }
+        .btn-red { background: #dc2626 !important; }
+        .btn-red:hover { background: #b91c1c !important; }
+        .message { font-size: 14px; margin-top: 10px; color: #1f4d2e; }
+        .error { color: #b91c1c; font-size: 13px; margin-top: 6px; }
+        #map { flex: 1; height: 100vh; }
+        .records { margin-top: 20px; border-top: 1px solid #ddd; padding-top: 15px; display: none; }
+        .records h2 { margin-top: 0; font-size: 18px; margin-bottom: 12px; }
+        .record-item { border: 2px solid #d1d5db; border-radius: 8px; padding: 10px; margin-bottom: 10px; background: #fafafa; cursor: pointer; transition: 0.2s; }
+        .record-item:hover { background: #f3f4f6; }
+        .record-item.selected { border-color: #2563eb; background: #dbeafe; }
+        .record-line { font-size: 13px; margin-bottom: 4px; color: #111827; }
+        .record-label { font-weight: bold; }
+        .empty-records { color: #666; font-size: 13px; }
+        .selected-text { font-size: 13px; color: #1d4ed8; margin-top: 4px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="panel">
+            <h1>Contenedor Celiaco</h1>
+            <p>Registro de establecimientos con opciones libres de gluten.</p>
+
+            <form id="restaurantForm" novalidate>
+                <div class="field">
+                    <label for="name">Nombre</label>
+                    <input type="text" id="name" required>
+                    <div class="error" id="err_name"></div>
+                </div>
+
+                <div class="field">
+                    <label for="category">Categoria</label>
+                    <select id="category" required>
+                        <option value="">Seleccione una categoria</option>
+                        <option value="Restaurante">Restaurante</option>
+                        <option value="Cafeteria">Cafeteria</option>
+                        <option value="Panaderia">Panaderia</option>
+                    </select>
+                    <div class="error" id="err_category"></div>
+                </div>
+
+                <div class="field">
+                    <label for="description">Descripcion</label>
+                    <select id="description" required>
+                        <option value="">Seleccione una opcion</option>
+                        <option value="Gluten Free">Gluten Free</option>
+                        <option value="Opciones Gluten Free">Opciones Gluten Free</option>
+                    </select>
+                    <div class="error" id="err_description"></div>
+                </div>
+
+                <div class="field">
+                    <label for="lat">Latitud</label>
+                    <input type="number" step="any" id="lat" required>
+                    <div class="error" id="err_lat"></div>
+                </div>
+
+                <div class="field">
+                    <label for="lng">Longitud</label>
+                    <input type="number" step="any" id="lng" required>
+                    <div class="error" id="err_lng"></div>
+                </div>
+
+                <div class="field">
+                    <label>Buscar por proximidad</label>
+                    <input type="number" step="any" id="near_lat" placeholder="Latitud">
+                </div>
+
+                <div class="field">
+                    <input type="number" step="any" id="near_lng" placeholder="Longitud">
+                </div>
+
+                <div class="field">
+                    <input type="number" id="near_radius" placeholder="Radio en metros">
+                </div>
+
+                <div class="field">
+                    <button type="button" class="btn-blue" id="nearBtn">Buscar cercanos</button>
+                </div>
+
+                <div class="field">
+                    <button type="submit">Guardar establecimiento</button>
+                    <button type="button" class="btn-blue" id="showBtn">Establecimientos guardados</button>
+                    <button type="button" class="btn-orange" id="editBtn">Editar</button>
+                    <button type="button" class="btn-red" id="deleteBtn">Eliminar</button>
+                </div>
+
+                <div class="selected-text" id="selectedText">Ningun registro seleccionado.</div>
+                <div class="message" id="message"></div>
+            </form>
+
+            <div class="records" id="recordsSection">
+                <h2>Registros almacenados</h2>
+                <div id="recordsList" class="empty-records">No hay registros para mostrar.</div>
+            </div>
+        </div>
+
+        <div id="map"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script>
+        const API_URL = 'http://127.0.0.1:8000/restaurants';
+        const map = L.map('map').setView([14.6, -90.5], 11);
+        const markers = [];
+
+        let restaurantsCache = [];
+        let selectedRestaurant = null;
+        let editingMode = false;
+        let registrosYaMostrados = false;
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: 'OSM'
+        }).addTo(map);
+
+        function clearMarkers() {
+            for (let i = 0; i < markers.length; i++) {
+                map.removeLayer(markers[i]);
+            }
+            markers.length = 0;
+        }
+
+        function setError(id, msg) {
+            document.getElementById(id).textContent = msg || '';
+        }
+
+        function clearErrors() {
+            setError('err_name', '');
+            setError('err_category', '');
+            setError('err_description', '');
+            setError('err_lat', '');
+            setError('err_lng', '');
+        }
+
+        function validateForm() {
+            let ok = true;
+
+            const name = document.getElementById('name').value.trim();
+            const category = document.getElementById('category').value;
+            const description = document.getElementById('description').value;
+            const lat = Number(document.getElementById('lat').value);
+            const lng = Number(document.getElementById('lng').value);
+
+            clearErrors();
+
+            if (name.length < 2) {
+                setError('err_name', 'Ingrese un nombre valido');
+                ok = false;
+            }
+
+            if (!category) {
+                setError('err_category', 'Seleccione una categoria');
+                ok = false;
+            }
+
+            if (!description) {
+                setError('err_description', 'Seleccione una opcion');
+                ok = false;
+            }
+
+            if (isNaN(lat) || lat < -90 || lat > 90) {
+                setError('err_lat', 'Latitud invalida (-90 a 90)');
+                ok = false;
+            }
+
+            if (isNaN(lng) || lng < -180 || lng > 180) {
+                setError('err_lng', 'Longitud invalida (-180 a 180)');
+                ok = false;
+            }
+
+            return ok;
+        }
+
+        function getFormData() {
+            return {
+                name: document.getElementById('name').value.trim(),
+                category: document.getElementById('category').value,
+                description: document.getElementById('description').value,
+                lat: Number(document.getElementById('lat').value),
+                lng: Number(document.getElementById('lng').value)
+            };
+        }
+
+        function clearForm() {
+            document.getElementById('restaurantForm').reset();
+        }
+
+        function fillForm(data) {
+            document.getElementById('name').value = data.name;
+            document.getElementById('category').value = data.category;
+            document.getElementById('description').value = data.description;
+            document.getElementById('lat').value = data.lat;
+            document.getElementById('lng').value = data.lng;
+        }
+
+        function updateSelectedText() {
+            const el = document.getElementById('selectedText');
+
+            if (!selectedRestaurant) {
+                el.textContent = 'Ningun registro seleccionado.';
+                return;
+            }
+
+            el.textContent = 'Seleccionado: ' + selectedRestaurant.name;
+        }
+
+        function renderRecords(data) {
+            const recordsList = document.getElementById('recordsList');
+
+            if (!data || data.length === 0) {
+                recordsList.className = 'empty-records';
+                recordsList.innerHTML = 'No hay registros para mostrar.';
+                return;
+            }
+
+            recordsList.className = '';
+            let html = '';
+
+            for (let i = 0; i < data.length; i++) {
+                const p = data[i];
+                const selectedClass = (selectedRestaurant && selectedRestaurant.id === p.id) ? 'selected' : '';
+
+                html += `
+                    <div class="record-item ${selectedClass}" onclick="selectRestaurant(${p.id})">
+                        <div class="record-line"><span class="record-label">Nombre:</span> ${p.name}</div>
+                        <div class="record-line"><span class="record-label">Categoria:</span> ${p.category}</div>
+                        <div class="record-line"><span class="record-label">Descripcion:</span> ${p.description}</div>
+                        <div class="record-line"><span class="record-label">Latitud:</span> ${p.lat}</div>
+                        <div class="record-line"><span class="record-label">Longitud:</span> ${p.lng}</div>
+                    </div>
+                `;
+            }
+
+            recordsList.innerHTML = html;
+        }
+
+        function renderMarkers(data) {
+            clearMarkers();
+
+            const bounds = [];
+
+            for (let i = 0; i < data.length; i++) {
+                const p = data[i];
+                const lat = Number(p.lat);
+                const lng = Number(p.lng);
+
+                const marker = L.marker([lat, lng]).addTo(map)
+                    .bindPopup(
+                        '<b>' + p.name + '</b><br>' +
+                        p.category + '<br>' +
+                        p.description + '<br>' +
+                        'Lat: ' + p.lat + '<br>' +
+                        'Lng: ' + p.lng
+                    );
+
+                markers.push(marker);
+                bounds.push([lat, lng]);
+            }
+
+            if (bounds.length > 0) {
+                map.fitBounds(bounds);
+            } else {
+                map.setView([14.6, -90.5], 11);
+            }
+        }
+
+        function refreshVisibleRecords() {
+            if (!registrosYaMostrados) {
+                return;
+            }
+
+            renderRecords(restaurantsCache);
+            renderMarkers(restaurantsCache);
+            updateSelectedText();
+        }
+
+        function loadRestaurants() {
+            fetch(API_URL)
+                .then(r => {
+                    if (!r.ok) {
+                        throw new Error('Error al cargar');
+                    }
+                    return r.json();
+                })
+                .then(data => {
+                    restaurantsCache = data;
+
+                    if (selectedRestaurant) {
+                        let found = null;
+                        for (let i = 0; i < data.length; i++) {
+                            if (data[i].id === selectedRestaurant.id) {
+                                found = data[i];
+                                break;
+                            }
+                        }
+                        selectedRestaurant = found;
+                    }
+
+                    refreshVisibleRecords();
+                })
+                .catch(err => {
+                    console.log(err);
+                    document.getElementById('message').textContent = 'Error al cargar registros';
+                });
+        }
+
+        function selectRestaurant(id) {
+            let found = null;
+
+            for (let i = 0; i < restaurantsCache.length; i++) {
+                if (restaurantsCache[i].id === id) {
+                    found = restaurantsCache[i];
+                    break;
+                }
+            }
+
+            selectedRestaurant = found;
+            refreshVisibleRecords();
+            document.getElementById('message').textContent = 'Registro seleccionado';
+        }
+
+        window.selectRestaurant = selectRestaurant;
+
+        document.getElementById('restaurantForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            if (!validateForm()) return;
+
+            const formData = getFormData();
+
+            if (editingMode && selectedRestaurant) {
+                fetch(API_URL + '/' + selectedRestaurant.id, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(formData)
+                })
+                .then(r => {
+                    if (!r.ok) throw new Error('Error al actualizar');
+                    return r.json();
+                })
+                .then(data => {
+                    document.getElementById('message').textContent = data.mensaje || 'Registro actualizado correctamente';
+                    selectedRestaurant = null;
+                    editingMode = false;
+                    clearForm();
+                    loadRestaurants();
+                })
+                .catch(err => {
+                    console.log(err);
+                    document.getElementById('message').textContent = 'Error al actualizar';
+                });
+            } else {
+                fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(formData)
+                })
+                .then(r => {
+                    if (!r.ok) throw new Error('Error al guardar');
+                    return r.json();
+                })
+                .then(data => {
+                    document.getElementById('message').textContent = data.mensaje || 'Registro agregado correctamente';
+                    selectedRestaurant = null;
+                    editingMode = false;
+                    clearForm();
+                    loadRestaurants();
+                })
+                .catch(err => {
+                    console.log(err);
+                    document.getElementById('message').textContent = 'Error al guardar';
+                });
+            }
+        });
+
+        document.getElementById('showBtn').addEventListener('click', function() {
+            registrosYaMostrados = true;
+            document.getElementById('recordsSection').style.display = 'block';
+            loadRestaurants();
+            document.getElementById('message').textContent = 'Registros cargados';
+        });
+
+        document.getElementById('editBtn').addEventListener('click', function() {
+            if (!selectedRestaurant) {
+                document.getElementById('message').textContent = 'Seleccione un registro primero';
+                return;
+            }
+
+            fillForm(selectedRestaurant);
+            editingMode = true;
+            document.getElementById('message').textContent = 'Edicion activada. Modifique y luego presione Guardar establecimiento';
+        });
+
+        document.getElementById('deleteBtn').addEventListener('click', function() {
+            if (!selectedRestaurant) {
+                document.getElementById('message').textContent = 'Seleccione un registro primero';
+                return;
+            }
+
+            fetch(API_URL + '/' + selectedRestaurant.id, {
+                method: 'DELETE'
+            })
+            .then(r => {
+                if (!r.ok) throw new Error('Error al eliminar');
+                return r.json();
+            })
+            .then(data => {
+                document.getElementById('message').textContent = data.mensaje || 'Registro eliminado correctamente';
+                selectedRestaurant = null;
+                editingMode = false;
+                clearForm();
+                loadRestaurants();
+            })
+            .catch(err => {
+                console.log(err);
+                document.getElementById('message').textContent = 'Error al eliminar';
+            });
+        });
+
+        document.getElementById('nearBtn').addEventListener('click', function() {
+            const lat = document.getElementById('near_lat').value;
+            const lng = document.getElementById('near_lng').value;
+            const radius = document.getElementById('near_radius').value;
+
+            if (!lat || !lng || !radius) {
+                document.getElementById('message').textContent = 'Complete latitud, longitud y radio';
+                return;
+            }
+
+            fetch('http://127.0.0.1:8000/restaurants/nearby?lat=' + lat + '&lng=' + lng + '&radius_m=' + radius)
+                .then(r => {
+                    if (!r.ok) {
+                        throw new Error('Error en proximidad');
+                    }
+                    return r.json();
+                })
+                .then(data => {
+                    registrosYaMostrados = true;
+                    document.getElementById('recordsSection').style.display = 'block';
+                    restaurantsCache = data;
+                    selectedRestaurant = null;
+                    renderRecords(data);
+                    renderMarkers(data);
+                    updateSelectedText();
+                    document.getElementById('message').textContent = 'Resultados por proximidad';
+                })
+                .catch(err => {
+                    console.log(err);
+                    document.getElementById('message').textContent = 'Error en busqueda por proximidad';
+                });
+        });
+    </script>
+</body>
+</html>
